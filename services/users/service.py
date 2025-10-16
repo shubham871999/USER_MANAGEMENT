@@ -1,24 +1,42 @@
+# --- Add these lines at the top of service.py ---
+
+import os
+import sys
+
+# Get the absolute path to the project root (USER_MANAGEMENT)
+CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(CURRENT_DIR)))
+
+# Add the project root to sys.path if it's not already there
+if PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, PROJECT_ROOT)
+
+# --- Now normal imports will work ---
+from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
-from services.users import models, schemas
-from core.common.utils import hash_password
-from core.common.exceptions import UserNotFound
+from services.users.schemas import UserResponse, UserBase, UserCreate
+from core.database.session import get_db
+from services.users import service  # ✅ only import AFTER sys.path fix
 
-def create_user(db: Session, user_in: schemas.UserCreate):
-    user = models.User(
-        username=user_in.username,
-        email=user_in.email,
-        hashed_password=hash_password(user_in.password)
-    )
-    db.add(user)
-    db.commit()
-    db.refresh(user)
-    return user
+router = APIRouter(prefix="/users", tags=["Users"])
 
-def get_user_by_id(db: Session, user_id: int):
-    user = db.query(models.User).filter(models.User.id == user_id).first()
-    if not user:
-        raise UserNotFound
-    return user
+# ✅ Class-based route handler
+class UserRouter:
 
-def list_users(db: Session):
-    return db.query(models.User).all()
+    @staticmethod
+    @router.post("/", response_model=UserResponse)
+    def create_user(user_in: UserCreate, db: Session = Depends(get_db)):
+        """Create a new user"""
+        return service.create_user(db, user_in)
+
+    @staticmethod
+    @router.get("/{user_id}", response_model=UserResponse)
+    def get_user(user_id: int, db: Session = Depends(get_db)):
+        """Get a user by ID"""
+        return service.get_user_by_id(db, user_id)
+
+    @staticmethod
+    @router.get("/", response_model=list[UserResponse])
+    def list_all_users(db: Session = Depends(get_db)):
+        """List all users"""
+        return service.list_users(db)
