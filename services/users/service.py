@@ -1,42 +1,35 @@
-# --- Add these lines at the top of service.py ---
-
-import os
-import sys
-
-# Get the absolute path to the project root (USER_MANAGEMENT)
-CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
-PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(CURRENT_DIR)))
-
-# Add the project root to sys.path if it's not already there
-if PROJECT_ROOT not in sys.path:
-    sys.path.insert(0, PROJECT_ROOT)
-
-# --- Now normal imports will work ---
-from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
-from services.users.schemas import UserResponse, UserBase, UserCreate
-from core.database.session import get_db
-from services.users import service  # ✅ only import AFTER sys.path fix
+from services.users import models, schemas
+from core.common.utils import hash_password, verify_password
+from fastapi import HTTPException, status
 
-router = APIRouter(prefix="/users", tags=["Users"])
+def create_user(db: Session, user_in: schemas.UserCreate) -> models.User:
+    # check duplicate
+    existing = db.query(models.User).filter(models.User.email == user_in.email).first()
+    if existing:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
+                            detail="Email already registered")
+    user = models.User(
+        email=user_in.email,
+        full_name=user_in.full_name,
+        hashed_password=hash_password(user_in.password),
+    )
+    db.add(user)
+    db.commit()
+    db.refresh(user)
+    return user
 
-# ✅ Class-based route handler
-class UserRouter:
+def get_user_by_id(db: Session, user_id: int) -> models.User | None:
+    return db.query(models.User).filter(models.User.id == user_id).first()
 
-    @staticmethod
-    @router.post("/", response_model=UserResponse)
-    def create_user(user_in: UserCreate, db: Session = Depends(get_db)):
-        """Create a new user"""
-        return service.create_user(db, user_in)
+def get_user_by_email(db: Session, email: str) -> models.User | None:
+    return db.query(models.User).filter(models.User.email == email).first()
 
-    @staticmethod
-    @router.get("/{user_id}", response_model=UserResponse)
-    def get_user(user_id: int, db: Session = Depends(get_db)):
-        """Get a user by ID"""
-        return service.get_user_by_id(db, user_id)
+def authenticate_user(db: Session, email: str, password: str) -> models.User:
+    user = get_user_by_email(db, email)
+    if not user or not verify_password(password, user.hashed_password):
+        return None
+    return user
 
-    @staticmethod
-    @router.get("/", response_model=list[UserResponse])
-    def list_all_users(db: Session = Depends(get_db)):
-        """List all users"""
-        return service.list_users(db)
+def list_users(db: Session):
+    return db.query(models.User).all()
